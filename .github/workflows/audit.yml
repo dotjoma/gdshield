@@ -48,9 +48,24 @@ jobs:
         shell: pwsh
         run: |
           mkdir -Force build/desktop
-          cmd /c "godot --headless --export-release `"Windows Desktop`" build/desktop/audit_build.exe"
           if (Test-Path bin/libgame.dll) {
-            Copy-Item bin/libgame.dll build/desktop/libgame.dll
+            Copy-Item bin/libgame.dll build/desktop/libgame.dll -Force
+          }
+          $godot = if ($env:GODOT -and (Test-Path $env:GODOT)) {
+            $env:GODOT
+          } elseif ($env:GODOT4 -and (Test-Path $env:GODOT4)) {
+            $env:GODOT4
+          } else {
+            (Get-ChildItem -Path "C:\Users\runneradmin", "$HOME" -Filter "Godot*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          Write-Host "Resolved Godot executable: $godot"
+          & $godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Godot export failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          if (Test-Path bin/libgame.dll) {
+            Copy-Item bin/libgame.dll build/desktop/libgame.dll -Force
           }
           Get-ChildItem -Path build -Recurse
 
