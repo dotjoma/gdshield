@@ -32,17 +32,21 @@ jobs:
           version: 4.3.0
           include-templates: true
 
+      # 1. Regenerates a fresh build seed so build_seed.generated.h exists before compilation
+      - name: Rotate native build seed
+        run: python tools/gdshield/gdshield.py reseed
+
+      # 2. Build native GDExtension library using the generated seed
       - name: Build native GDExtension library
         run: |
           mkdir -Force bin
           g++ -O3 -shared -Iinclude -s "-Wl,--strip-all" src/entry.cpp -o bin/libgame.dll
 
-      # Regenerates a fresh build seed so CI builds don't all share one offset.
-      - name: Rotate native build seed
-        run: python tools/gdshield/gdshield.py reseed
-
+      # 3. Export release build (triggers gdshield post-export hook)
       - name: Export release build (triggers gdshield post-export hook)
-        run: godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
+        run: |
+          mkdir -Force build/desktop
+          godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
 
       - name: Self-Audit Build Output
         shell: pwsh

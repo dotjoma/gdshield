@@ -21,10 +21,12 @@
 // by `gdshield.py reseed`, written to build_seed.generated.h (gitignored).
 // There is deliberately no default value here: a missing header is a build
 // error, so it's not possible to ship a binary with the public-repo default.
+#if __has_include("build_seed.generated.h")
 #include "build_seed.generated.h"
+#endif
 
 #ifndef GDSHIELD_BUILD_SEED
-#error "GDSHIELD_BUILD_SEED is not defined. Run `python tools/gdshield/gdshield.py init` first."
+#error "GDSHIELD_BUILD_SEED is not defined. Run `python tools/gdshield/gdshield.py init` or `reseed` first."
 #endif
 
 namespace gdshield {
