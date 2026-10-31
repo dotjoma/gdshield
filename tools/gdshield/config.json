@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "engine": "godot_4.x",
+  "pck": {
+    "magic": "MMOR",
+    "offset_padding_bytes": 512,
+    "scramble_header": true
+  },
+  "binary": {
+    "strip_symbols": true,
+    "strip_debug_sections": true
+  },
+  "audit": {
+    "forbidden_magic": "GDPC",
+    "forbidden_strings": [
+      "/api/state",
+      "/api/action",
+      "/api/events"
+    ]
+  },
+  "frontend": {
+    "strip_console": true,
+    "strip_comments": true,
+    "block_devtools": true
+  }
+}

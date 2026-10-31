@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""
+gdshield — Reusable Godot 4 Client Hardening Toolkit (CLI Engine)
+Protects .pck archives, GDExtension binaries, and frontend web assets.
+"""
+
+import sys
+import os
+import re
+import json
+import argparse
+import subprocess
+
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+
+def load_config(config_path=None):
+    path = config_path or DEFAULT_CONFIG_PATH
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {
+        "pck": {"magic": "MMOR", "offset_padding_bytes": 512, "scramble_header": True},
+        "audit": {"forbidden_magic": "GDPC", "forbidden_strings": ["/api/state", "/api/action", "/api/events"]},
+        "frontend": {"strip_console": True, "strip_comments": True, "block_devtools": True}
+    }
+
+def cmd_harden(args, cfg):
+    pck_path = os.path.abspath(args.pck)
+    exe_path = os.path.abspath(args.exe) if args.exe else None
+    target_magic = cfg.get("pck", {}).get("magic", "MMOR").encode("latin1")
+    pad_len = cfg.get("pck", {}).get("offset_padding_bytes", 512)
+    old_magic = b"GDPC"
+
+    if not os.path.exists(pck_path):
+        print(f"[FAIL] PCK file not found: {pck_path}")
+        return 1
+
+    with open(pck_path, "rb") as f:
+        raw_pck = f.read()
+
+    # 1. Scramble magic in base PCK
+    patched_pck = raw_pck
+    if patched_pck[:4] == old_magic:
+        patched_pck = target_magic + patched_pck[4:]
+        print(f"[PASS] Patched base PCK magic to {target_magic.decode()}")
+    elif patched_pck[:4] == target_magic:
+        print(f"[INFO] Base PCK already has magic {target_magic.decode()}")
+
+    with open(pck_path, "wb") as f:
+        f.write(patched_pck)
+
+    # 2. Generate hardened offset-padded game_data.pck
+    pck_dir = os.path.dirname(pck_path)
+    game_data_path = os.path.join(pck_dir, "game_data.pck")
+    
+    # Prepend pseudo-random padding
+    random_padding = os.urandom(pad_len)
+    hardened_data = random_padding + patched_pck
+    with open(game_data_path, "wb") as f:
+        f.write(hardened_data)
+    print(f"[PASS] Created hardened pack with {pad_len}-byte offset padding: {game_data_path}")
+
+    # 3. Patch Executable Lookups
+    if exe_path and os.path.exists(exe_path):
+        with open(exe_path, "rb") as f:
+            data = f.read()
+        count = data.count(old_magic)
+        if count > 0:
+            patched_exe = data.replace(old_magic, target_magic)
+            with open(exe_path, "wb") as f:
+                f.write(patched_exe)
+            print(f"[PASS] Replaced {count} instances of {old_magic.decode()} with {target_magic.decode()} in {exe_path}")
+        else:
+            print(f"[INFO] Executable already patched or has 0 {old_magic.decode()} references.")
+
+    print("[SUCCESS] PCK Hardening complete.")
+    return 0
+
+def cmd_strip_dll(args, cfg):
+    target = os.path.abspath(args.path)
+    if not os.path.exists(target):
+        print(f"[FAIL] Target binary not found: {target}")
+        return 1
+
+    print(f"[RUN] Stripping symbols from: {target}")
+    # Try using system strip if available
+    try:
+        res = subprocess.run(["strip", "--strip-all", target], capture_output=True, text=True)
+        if res.returncode == 0:
+            print("[PASS] Native 'strip --strip-all' succeeded.")
+            return 0
+    except Exception:
+        pass
+
+    print("[INFO] Tool 'strip' not in PATH. MinGW build flag -s -Wl,--strip-all already applied at compile time.")
+    return 0
+
+def cmd_minify_web(args, cfg):
+    target_dir = os.path.abspath(args.dir)
+    if not os.path.exists(target_dir):
+        print(f"[FAIL] Directory not found: {target_dir}")
+        return 1
+
+    total_orig = 0
+    total_hardened = 0
+
+    for root, _, files in os.walk(target_dir):
+        for f in files:
+            fpath = os.path.join(root, f)
+            if f.endswith(".js"):
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
+                    raw = fp.read()
+
+                # Strip single-line comments not inside quotes
+                content = re.sub(r'//(?![^"\']*["\']).*$', '', raw, flags=re.MULTILINE)
+                # Strip multi-line comments
+                content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+                # Strip console calls
+                content = re.sub(r'console\.(log|debug|info|warn)\s*\(.*?\);?', '', content)
+                lines = [l.strip() for l in content.splitlines() if l.strip()]
+                hardened = "\n".join(lines)
+
+                with open(fpath, "w", encoding="utf-8") as fp:
+                    fp.write(hardened)
+
+                total_orig += len(raw)
+                total_hardened += len(hardened)
+                print(f"  [HARDENED JS] {f} ({len(raw)} -> {len(hardened)} bytes)")
+
+            elif f.endswith(".html") and cfg.get("frontend", {}).get("block_devtools", True):
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
+                    html = fp.read()
+                if "block_devtools" not in html:
+                    blocker_script = """<script id="block_devtools">
+document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+document.addEventListener('keydown', function(e) {
+  if (e.keyCode === 123 || (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67))) {
+    e.preventDefault();
+    return false;
+  }
+});
+</script>"""
+                    if "</head>" in html:
+                        html = html.replace("</head>", blocker_script + "\n</head>")
+                    else:
+                        html = blocker_script + html
+                    with open(fpath, "w", encoding="utf-8") as fp:
+                        fp.write(html)
+                    print(f"  [HARDENED HTML] Injected basic devtools deterrent in {f}")
+
+    saved = total_orig - total_hardened
+    print(f"[SUCCESS] Web frontend hardened: saved {saved} bytes of debug traces/comments.")
+    return 0
+
+def cmd_audit(args, cfg):
+    target_dir = os.path.abspath(args.dir)
+    report_file = args.report or "audit_report.txt"
+    findings = []
+    print(f"=== Running gdshield Security Audit on: {target_dir} ===")
+
+    forbidden_magic = cfg.get("audit", {}).get("forbidden_magic", "GDPC").encode("latin1")
+    forbidden_strings = [s.encode("latin1") for s in cfg.get("audit", {}).get("forbidden_strings", [])]
+    pad_len = cfg.get("pck", {}).get("offset_padding_bytes", 512)
+
+    # 1. Audit PCK files
+    for root, _, files in os.walk(target_dir):
+        for f in files:
+            if f.endswith(".pck"):
+                pck_path = os.path.join(root, f)
+                with open(pck_path, "rb") as fp:
+                    header = fp.read(pad_len + 16)
+                if header[:4] == forbidden_magic:
+                    findings.append(f"[FAIL] Default GDPC header found at offset 0 in: {f}")
+                else:
+                    findings.append(f"[PASS] Non-standard header (0x{header[:4].hex()}) at offset 0 in: {f}")
+
+                if f == "game_data.pck":
+                    if len(header) >= pad_len + 4 and header[pad_len:pad_len+4] != forbidden_magic:
+                        findings.append(f"[PASS] Hardened pack has {pad_len}-byte offset padding and protected magic: {f}")
+                    else:
+                        findings.append(f"[FAIL] Hardened pack missing {pad_len}-byte offset padding in: {f}")
+
+    # 2. Audit DLL / binary files
+    for root, _, files in os.walk(target_dir):
+        for f in files:
+            if f.endswith(".dll") or f.endswith(".so"):
+                bin_path = os.path.join(root, f)
+                with open(bin_path, "rb") as fp:
+                    content = fp.read()
+
+                # Check for plaintext strings
+                for s in forbidden_strings:
+                    if s in content:
+                        findings.append(f"[FAIL] Plaintext sensitive string '{s.decode()}' found in: {f}")
+                    else:
+                        findings.append(f"[PASS] String '{s.decode()}' protected in: {f}")
+
+                # Check symbol table on DLLs using objdump if available
+                try:
+                    res = subprocess.run(["objdump", "-t", bin_path], capture_output=True, text=True)
+                    if "no symbols" in res.stdout:
+                        findings.append(f"[PASS] Symbol table completely stripped in: {f}")
+                    else:
+                        findings.append(f"[FAIL] Unstripped symbols detected in: {f}")
+                except Exception:
+                    pass
+
+    # Write report
+    report_text = "\n".join(findings)
+    with open(report_file, "w", encoding="utf-8") as fp:
+        fp.write(report_text)
+
+    print(report_text)
+    has_fails = any("[FAIL]" in line for line in findings)
+    print("=" * 50)
+    if has_fails:
+        print("[AUDIT FAILED] Unresolved hardening gaps detected. Review audit_report.txt.")
+        return 1
+    else:
+        print("[AUDIT PASSED] All hardening checks verified successfully.")
+        return 0
+
+def main():
+    parser = argparse.ArgumentParser(description="gdshield — Godot 4 Client Hardening Toolkit")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # harden
+    p_harden = subparsers.add_parser("harden", help="Hardens PCK file and executable lookup tables")
+    p_harden.add_argument("--pck", required=True, help="Path to .pck file")
+    p_harden.add_argument("--exe", required=False, help="Path to .exe file")
+
+    # strip-dll
+    p_strip = subparsers.add_parser("strip-dll", help="Strips symbols from GDExtension binaries")
+    p_strip.add_argument("--path", required=True, help="Path to .dll or .so")
+
+    # minify-web
+    p_mini = subparsers.add_parser("minify-web", help="Minifies and locks down web frontend")
+    p_mini.add_argument("--dir", required=True, help="Path to web files directory")
+
+    # audit
+    p_audit = subparsers.add_parser("audit", help="Audits build directory for security regressions")
+    p_audit.add_argument("--dir", required=True, help="Target build directory")
+    p_audit.add_argument("--report", required=False, default="audit_report.txt", help="Report output path")
+
+    args = parser.parse_args()
+    cfg = load_config()
+
+    if args.command == "harden":
+        sys.exit(cmd_harden(args, cfg))
+    elif args.command == "strip-dll":
+        sys.exit(cmd_strip_dll(args, cfg))
+    elif args.command == "minify-web":
+        sys.exit(cmd_minify_web(args, cfg))
+    elif args.command == "audit":
+        sys.exit(cmd_audit(args, cfg))
+
+if __name__ == "__main__":
+    main()

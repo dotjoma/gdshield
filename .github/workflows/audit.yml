@@ -1,0 +1,32 @@
+name: gdshield Security Audit
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate gdshield CLI & Config
+        run: |
+          python tools/gdshield/gdshield.py --help
+          python -c "import json; json.load(open('tools/gdshield/config.json'))"
+
+      - name: Self-Audit Workspace
+        run: |
+          python tools/gdshield/gdshield.py audit --dir . --report audit_report.txt
+          if grep -q "\[FAIL\]" audit_report.txt; then
+            echo "Security regression detected in audit_report.txt"
+            exit 1
+          fi

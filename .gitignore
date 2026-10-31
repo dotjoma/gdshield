@@ -1,0 +1,29 @@
+# Godot 4
+.godot/
+*.translation
+*.import
+
+# Build outputs
+build/
+bin/
+*.exe
+*.pck
+*.dll
+*.so
+*.dylib
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+audit_report.txt
+
+# OS / Editors
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
