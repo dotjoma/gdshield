@@ -2,6 +2,7 @@
 .godot/
 *.translation
 *.import
+*.uid
 
 # Build outputs
 build/
