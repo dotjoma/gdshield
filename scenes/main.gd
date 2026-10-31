@@ -1,5 +1,7 @@
 extends Control
 
+const GDShieldRuntime = preload("res://addons/gdshield/gdshield_runtime.gd")
+
 @onready var status_label: Label = $VBoxContainer/StatusLabel
 @onready var audit_button: Button = $VBoxContainer/AuditButton
 
