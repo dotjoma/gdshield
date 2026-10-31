@@ -5,7 +5,11 @@
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
-#elif defined(__linux__) || defined(__ANDROID__)
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
+#elif defined(__ANDROID__) || defined(__linux__)
 #include <sys/ptrace.h>
 #include <unistd.h>
 #include <fstream>
@@ -34,8 +38,34 @@ struct ObfString {
 // Cross-platform anti-debugging tripwire
 inline bool is_debugger_present() {
 #if defined(_WIN32) || defined(_WIN64)
-    return IsDebuggerPresent() != 0;
-#elif defined(__linux__) || defined(__ANDROID__)
+    if (IsDebuggerPresent() != 0) return true;
+    BOOL remoteDebugger = FALSE;
+    if (CheckRemoteDebuggerPresent(GetCurrentProcess(), &remoteDebugger) && remoteDebugger) {
+        return true;
+    }
+    return false;
+#elif defined(__APPLE__)
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    struct kinfo_proc info{};
+    size_t size = sizeof(info);
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) == 0) {
+        return (info.kp_proc.p_flag & P_TRACED) != 0;
+    }
+    return false;
+#elif defined(__ANDROID__)
+    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) {
+        return true; // Already traced by a debugger (e.g. Frida or GDB)
+    }
+    std::ifstream statusFile("/proc/self/status");
+    std::string line;
+    while (std::getline(statusFile, line)) {
+        if (line.rfind("TracerPid:", 0) == 0) {
+            int tracerPid = std::stoi(line.substr(10));
+            return tracerPid != 0;
+        }
+    }
+    return false;
+#elif defined(__linux__)
     std::ifstream statusFile("/proc/self/status");
     std::string line;
     while (std::getline(statusFile, line)) {

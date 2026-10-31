@@ -12,10 +12,10 @@ func _mount_hardened_pack() -> void:
 	var pack_path: String = exe_dir.path_join("game_data.pck")
 	
 	if FileAccess.file_exists(pack_path):
-		var ok: bool = ProjectSettings.load_resource_pack(pack_path, true, 512)
+		var ok: bool = ProjectSettings.load_resource_pack(pack_path, true, GDShieldRuntime.PACK_OFFSET)
 		if ok:
-			status_label.text = "Status: Protected Pack Mounted (Offset: 512, Magic: MMOR)"
-			print("[GDShield Demo] Hardened pack mounted successfully at offset 512.")
+			status_label.text = "Status: Protected Pack Mounted (Offset: %d, Magic: %s)" % [GDShieldRuntime.PACK_OFFSET, GDShieldRuntime.PACK_MAGIC]
+			print("[GDShield Demo] Hardened pack mounted successfully at offset %d." % GDShieldRuntime.PACK_OFFSET)
 		else:
 			status_label.text = "Status: Error Mounting Hardened Pack"
 			push_error("[GDShield Demo] Failed to mount: " + pack_path)

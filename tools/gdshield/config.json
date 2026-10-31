@@ -2,8 +2,8 @@
   "version": "1.0.0",
   "engine": "godot_4.x",
   "pck": {
-    "magic": "MMOR",
-    "offset_padding_bytes": 512,
+    "magic": "MWYI",
+    "offset_padding_bytes": 448,
     "scramble_header": true
   },
   "binary": {

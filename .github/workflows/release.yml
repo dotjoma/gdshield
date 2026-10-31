@@ -1,0 +1,35 @@
+name: Release gdshield
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Package Toolkit ZIP
+        run: |
+          mkdir -p release_package
+          cp -r addons release_package/
+          cp -r tools release_package/
+          cp -r include release_package/
+          cp LICENSE release_package/
+          cp README.md release_package/
+          cd release_package
+          zip -r ../gdshield.zip .
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: gdshield.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true

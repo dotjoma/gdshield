@@ -62,14 +62,21 @@ Copy these folders into your existing Godot project root:
 - `tools/gdshield/`
 - `include/gdshield/` *(if using GDExtension C++)*
 
-### Step 2: Enable the Plugin
+### Step 2: Seed Unique Magic & Offset
+Run the generator once to create a project-unique PCK magic signature and random offset:
+```bash
+python tools/gdshield/gdshield.py init
+```
+This automatically updates `config.json` and generates `addons/gdshield/gdshield_runtime.gd`.
+
+### Step 3: Enable the Plugin
 In Godot Editor:
 - Go to **Project** -> **Project Settings** -> **Plugins**.
 - Enable **gdshield**.
 
 *(Optional but recommended)*: Also install and enable [GDMaim](https://github.com/cherram/gdmaim) for GDScript identifier and control-flow scrambling.
 
-### Step 3: Add Offset-Aware Loader Hook
+### Step 4: Add Offset-Aware Loader Hook
 In your game's main entry point (e.g. `main.gd` or bootstrap scene):
 ```gdscript
 func _ready() -> void:
@@ -77,11 +84,11 @@ func _ready() -> void:
     var exe_dir: String = OS.get_executable_path().get_base_dir()
     var pack_path: String = exe_dir.path_join("game_data.pck")
     if FileAccess.file_exists(pack_path):
-        ProjectSettings.load_resource_pack(pack_path, true, 512)
+        ProjectSettings.load_resource_pack(pack_path, true, GDShieldRuntime.PACK_OFFSET)
 ```
 *Note: In the Godot Editor or during unit tests, `game_data.pck` will not exist, so your game seamlessly loads local `res://` assets without interference.*
 
-### Step 4: Export Your Game
+### Step 5: Export Your Game
 Export your project normally using **Project** -> **Export...** (or via CLI):
 ```bash
 godot --headless --export-release "Windows Desktop" "build/desktop/mygame.exe"
