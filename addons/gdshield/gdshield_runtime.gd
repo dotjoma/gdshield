@@ -2,4 +2,6 @@
 class_name GDShieldRuntime
 
 const PACK_MAGIC: String = "MWYI"
-const PACK_OFFSET: int = 448
+# PACK_OFFSET intentionally removed. It is now derived at runtime inside the
+# native GDExtension (see include/gdshield/gdshield.hpp, derive_pack_offset())
+# and must be read via GDShieldNative.get_pack_offset(), never hardcoded here.

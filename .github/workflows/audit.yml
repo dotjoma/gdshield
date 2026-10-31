@@ -30,6 +30,7 @@ jobs:
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
+          use-dotnet: false
           include-templates: true
 
       # 1. Regenerates a fresh build seed so build_seed.generated.h exists before compilation
@@ -44,9 +45,14 @@ jobs:
 
       # 3. Export release build (triggers gdshield post-export hook)
       - name: Export release build (triggers gdshield post-export hook)
+        shell: pwsh
         run: |
           mkdir -Force build/desktop
-          godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
+          godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe | Out-Host
+          if (Test-Path bin/libgame.dll) {
+            Copy-Item bin/libgame.dll build/desktop/libgame.dll
+          }
+          Get-ChildItem -Path build -Recurse
 
       - name: Self-Audit Build Output
         shell: pwsh
