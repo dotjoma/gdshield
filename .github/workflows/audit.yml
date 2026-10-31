@@ -8,7 +8,10 @@ on:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    # The only export preset currently defined is "Windows Desktop"
+    # (export_presets.cfg) — run on windows-latest so it's exportable as-is.
+    # If you add a Linux preset, this can move to ubuntu-latest.
+    runs-on: windows-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -23,10 +26,30 @@ jobs:
           python tools/gdshield/gdshield.py --help
           python -c "import json; json.load(open('tools/gdshield/config.json'))"
 
-      - name: Self-Audit Workspace
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.3.0
+          include-templates: true
+
+      - name: Build native GDExtension library
         run: |
-          python tools/gdshield/gdshield.py audit --dir . --report audit_report.txt
-          if grep -q "\[FAIL\]" audit_report.txt; then
-            echo "Security regression detected in audit_report.txt"
+          mkdir -Force bin
+          g++ -O3 -shared -Iinclude -s "-Wl,--strip-all" src/entry.cpp -o bin/libgame.dll
+
+      # Regenerates a fresh build seed so CI builds don't all share one offset.
+      - name: Rotate native build seed
+        run: python tools/gdshield/gdshield.py reseed
+
+      - name: Export release build (triggers gdshield post-export hook)
+        run: godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
+
+      - name: Self-Audit Build Output
+        shell: pwsh
+        run: |
+          python tools/gdshield/gdshield.py audit --dir build --report audit_report.txt
+          Get-Content audit_report.txt
+          if (Select-String -Path audit_report.txt -Pattern "\[FAIL\]" -Quiet) {
+            Write-Error "Security regression detected in audit_report.txt"
             exit 1
-          fi
+          }

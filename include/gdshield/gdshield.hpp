@@ -17,6 +17,16 @@
 #include <fstream>
 #endif
 
+// Build-unique seed, generated per-project by `gdshield.py init` and per-release
+// by `gdshield.py reseed`, written to build_seed.generated.h (gitignored).
+// There is deliberately no default value here: a missing header is a build
+// error, so it's not possible to ship a binary with the public-repo default.
+#include "build_seed.generated.h"
+
+#ifndef GDSHIELD_BUILD_SEED
+#error "GDSHIELD_BUILD_SEED is not defined. Run `python tools/gdshield/gdshield.py init` first."
+#endif
+
 namespace gdshield {
 
 // Compile-time XOR string obfuscation template
@@ -37,13 +47,20 @@ struct ObfString {
     return s; \
 })()
 
-// Dynamic non-literal offset derivation (derived in native binary, never literal in GDScript)
-inline int derive_pack_offset(uint32_t project_salt = 0x5F3759DF) {
-    volatile uint32_t a = project_salt;
+// Honesty note: this is still a static, per-build value. A reverse engineer
+// with a disassembler and ~10 minutes recovers it the same way a GDScript
+// literal was recovered before -- this raises cost, it is not a hard boundary.
+// The actual architectural fix is tying this to a live, server-issued,
+// revocable value at handshake time (see gdshield-auth's session-key work);
+// that is a bigger change than this patch and should be tracked separately.
+inline int derive_pack_offset() {
+    constexpr uint32_t seed = GDSHIELD_BUILD_SEED;
+    volatile uint32_t a = seed;
     volatile uint32_t b = 0x1337BEEF;
-    volatile uint32_t c = (a ^ b) & 0x3FF;
-    // Guarantee minimum 384 bytes, maximum 1024 bytes, 64-byte struct alignment
-    uint32_t offset = (c | 0x180) & ~0x3F;
+    volatile uint32_t c = (a ^ b);
+    volatile uint32_t d = (c >> 7) ^ (c << 3);
+    volatile uint32_t e = (d + 0x9E3779B9u) & 0x3FF;
+    uint32_t offset = (e | 0x180) & ~0x3Fu;
     if (offset < 384) offset = 448;
     if (offset > 1024) offset = 512;
     return static_cast<int>(offset);
@@ -71,16 +88,20 @@ inline bool is_injection_detected() {
     return false;
 }
 
-// Hardware breakpoint detection (DR0 - DR3 debug registers)
+// Hardware breakpoint detection (DR0 - DR3 debug registers + DR7 enable flags)
 inline bool has_hardware_breakpoints() {
 #if defined(_WIN32) || defined(_WIN64)
     CONTEXT ctx{};
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     HANDLE hThread = GetCurrentThread();
     if (GetThreadContext(hThread, &ctx)) {
-        if (ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3) {
-            return true;
-        }
+        if (ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3) return true;
+        // DR7 bits 0,2,4,6 are the local/global enable flags for DR0-3.
+        // Without this, a debugger can leave addresses sitting in DR0-3
+        // but disabled, which the Dr0..Dr3 check alone would still flag --
+        // more importantly, DR7 also catches cases where only the enable
+        // bits are meaningfully set. Check both.
+        if (ctx.Dr7 & 0xFF) return true;
     }
 #endif
     return false;
@@ -110,7 +131,7 @@ inline bool is_debugger_present() {
         return true;
     }
 
-    // 3. Hardware Breakpoints
+    // 3. Hardware Breakpoints (DR0-DR3 and DR7)
     if (has_hardware_breakpoints()) return true;
 
     // 4. Timing delta
