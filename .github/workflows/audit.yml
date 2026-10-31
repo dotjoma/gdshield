@@ -44,30 +44,30 @@ jobs:
           g++ -O3 -shared -Iinclude -s "-Wl,--strip-all" src/entry.cpp -o bin/libgame.dll
 
       # 3. Export release build (triggers gdshield post-export hook)
+      #    Use bash (Git Bash) — setup-godot creates an extensionless
+      #    wrapper at $GODOT that pwsh/cmd cannot execute, but bash can.
       - name: Export release build (triggers gdshield post-export hook)
-        shell: pwsh
+        shell: bash
         run: |
-          mkdir -Force build/desktop
-          if (Test-Path bin/libgame.dll) {
-            Copy-Item bin/libgame.dll build/desktop/libgame.dll -Force
-          }
-          $godot = if ($env:GODOT -and (Test-Path $env:GODOT)) {
-            $env:GODOT
-          } elseif ($env:GODOT4 -and (Test-Path $env:GODOT4)) {
-            $env:GODOT4
-          } else {
-            (Get-ChildItem -Path "C:\Users\runneradmin", "$HOME" -Filter "Godot*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          }
-          Write-Host "Resolved Godot executable: $godot"
-          & $godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Godot export failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
-          if (Test-Path bin/libgame.dll) {
-            Copy-Item bin/libgame.dll build/desktop/libgame.dll -Force
-          }
-          Get-ChildItem -Path build -Recurse
+          set -euo pipefail
+          mkdir -p build/desktop
+          [ -f bin/libgame.dll ] && cp bin/libgame.dll build/desktop/libgame.dll || true
+
+          echo "--- diagnostics ---"
+          echo "GODOT=$GODOT"
+          which godot || true
+          file "$(which godot 2>/dev/null || echo /dev/null)" || true
+          echo "-------------------"
+
+          # Build import cache (required for headless export)
+          godot --headless --import || true
+
+          # Export
+          godot --headless --export-release "Windows Desktop" build/desktop/audit_build.exe
+
+          # Copy DLL again in case export overwrote the directory
+          [ -f bin/libgame.dll ] && cp bin/libgame.dll build/desktop/libgame.dll || true
+          find build -type f
 
       - name: Self-Audit Build Output
         shell: pwsh
